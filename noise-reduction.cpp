@@ -8,12 +8,12 @@
 const float bitRate = 44100;
 const int bufferSize = 2048;
 const int stride = bufferSize/2;
-float sensitivity = 2.0;
+float sensitivity = 10.0;
 
 int channel = 0;
 int numSamples;
 
-const float noise_seconds = 0.13; 
+const float noise_seconds = 0.43; 
 const int noise_samples = float(noise_seconds*bitRate);
 
 AudioFile<float> audioFile;
@@ -56,7 +56,7 @@ Noise getNoiseProfile(std::vector<float>& noise_dbBuffer)
 	for(int i=0; i < noise_dbBuffer.size(); i++)
 	{
 		float abs_dB = abs(noise_dbBuffer[i]);
-		if(abs_dB > 100)
+		if(abs_dB > 10000)
 			continue;
 		noise.mean += abs_dB;
 	}
@@ -65,7 +65,7 @@ Noise getNoiseProfile(std::vector<float>& noise_dbBuffer)
 	for(int i=0; i < noise_dbBuffer.size(); i++)
 	{
 		float abs_dB = abs(noise_dbBuffer[i]);
-		if(abs_dB > 100)
+		if(abs_dB > 10000)
 			continue;
 		noise.std_dev += (abs_dB - noise.mean)*(abs_dB - noise.mean);
 	}
@@ -81,7 +81,7 @@ int reduceGain(std::vector<float>& sig_dbBuffer, Noise noise)
 	for(int i = 0; i<sig_dbBuffer.size(); i++)
 	{
 		float abs_db = abs(sig_dbBuffer[i]);
-		std::cout<<noise.mean+(noise.std_dev*sensitivity)<<std::endl;
+		std::cout<<noise.mean<<","<<(noise.std_dev*sensitivity)<<std::endl;
 		float Gain = 0;
 		if(abs_db > noise.mean-(noise.std_dev*sensitivity))
 		{
