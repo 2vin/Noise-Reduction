@@ -3,12 +3,13 @@
 #include <math.h>		// log10 
 
 #define PI 3.14159265
+#define isnan(x) ((x) != (x)) 
 
 /* Variables declaration */
 const float bitRate = 44100;
 const int bufferSize = 2048;
 const int stride = bufferSize/2;
-float sensitivity = 10.0;
+float sensitivity = 20.0;
 
 int channel = 0;
 int numSamples;
@@ -36,6 +37,8 @@ int buffer_AmplitudeTodB(std::vector<float>& amplitude, std::vector<float>& dB)
 	for(int i=0; i<amplitude.size(); i++)
 	{
 		dB[i] = AmplitudeTodB(abs(amplitude[i]));
+		if(dB[i] > 10000 || dB[i] < -10000)
+			dB[i] = dB[i-1];
 	}
 }
 
@@ -56,23 +59,22 @@ Noise getNoiseProfile(std::vector<float>& noise_dbBuffer)
 	for(int i=0; i < noise_dbBuffer.size(); i++)
 	{
 		float abs_dB = abs(noise_dbBuffer[i]);
-		if(abs_dB > 10000)
-			continue;
-		noise.mean += abs_dB;
+		if(!(abs_dB > 10000 || abs_dB < -10000))
+			noise.mean += abs_dB;
 	}
 	noise.mean *= 1.0/noise_dbBuffer.size();
 
 	for(int i=0; i < noise_dbBuffer.size(); i++)
 	{
 		float abs_dB = abs(noise_dbBuffer[i]);
-		if(abs_dB > 10000)
-			continue;
-		noise.std_dev += (abs_dB - noise.mean)*(abs_dB - noise.mean);
+		if(!(abs_dB > 10000 || abs_dB < -10000))
+			noise.std_dev += ((abs_dB - noise.mean)*(abs_dB - noise.mean));
 	}
-	noise.std_dev = sqrt(noise.std_dev);
 	noise.std_dev *= 1.0/noise_dbBuffer.size();
-
+	noise.std_dev = sqrt(noise.std_dev);
 	
+	std::cout<<" Noise (mean),(std_dev)- "<<noise.mean<<","<<(noise.std_dev)<<std::endl;
+
 	return noise; 
 }
 
@@ -81,13 +83,21 @@ int reduceGain(std::vector<float>& sig_dbBuffer, Noise noise)
 	for(int i = 0; i<sig_dbBuffer.size(); i++)
 	{
 		float abs_db = abs(sig_dbBuffer[i]);
-		std::cout<<noise.mean<<","<<(noise.std_dev*sensitivity)<<std::endl;
+		
 		float Gain = 0;
-		if(abs_db > noise.mean-(noise.std_dev*sensitivity))
-		{
-			Gain = -32;
-		}
-		sig_dbBuffer[i] += Gain; 
+		// if(abs_db > noise.mean-(noise.std_dev*sensitivity))
+		// {
+		// 	Gain = -12;
+		// }
+		
+		//@TODO : Comment the following line
+		Gain = -18;
+		float GainFactor = (sensitivity/24.0)*(abs_db/60.0)*(abs_db/60.0)*(abs_db/60.0);
+		if(isnan(GainFactor))
+			GainFactor = 0;
+
+		sig_dbBuffer[i] += (Gain*GainFactor); 
+		std::cout<<GainFactor<<std::endl;
 	}
 }
 
@@ -147,29 +157,62 @@ int main(int argc, char** argv)
 	// Reduce Gain from Noise
 	reduceGain(sig_dbBuffer, nProfile);
 
+
 	buffer_dBToAmplitude(sig_dbBuffer, sigBuffer);
 
-	// Retrieve noise+signal from the buffers
-	// for (int i = 0; i < numSamples; i++)
-	// {	
-	// 	if(i < noise_samples)
-	// 	{
-	// 		audioFile.samples[channel][i] = noiseBuffer[i];
-	// 	}
-	// 	else
-	// 	{
-	// 		audioFile.samples[channel][i] = sigBuffer[i-noise_samples];
-	// 	}
-	// }
-	
-	// float filter = 0.6f, smoothed = audioFile.samples[channel][0];
-	// for (int i = 0; i < numSamples; i++)
-	// {
-	// 	float currentSample = audioFile.samples[channel][i];
-	// 	smoothed = filter*currentSample + (1.0 - filter)*smoothed;
-	// 	audioFile.samples[channel][i] = smoothed;
-	// }
 
+	// Filter dB Buffer array to avoid signal distortion
+	float filter = 0.5f, smoothed = sigBuffer[0];
+	for (int i = 0; i < sigBuffer.size(); i++)
+	{
+		smoothed = filter*sigBuffer[i] + (1.0 - filter)*smoothed;
+		sigBuffer[i] = smoothed;		
+	}
+
+	// Retrieve noise+signal from the buffers
+	for (int i = 0; i < numSamples; i++)
+	{	
+		if(i < noise_samples)
+		{
+			audioFile.samples[channel][i] = noiseBuffer[i];
+		}
+		else
+		{
+			audioFile.samples[channel][i] = sigBuffer[i-noise_samples];
+		}
+	}
+	
+
+	//------------------------------ FREQUENCY SMOOTHING ------------------------------//
+	// const size_t fftSize = 1024; // Needs to be power of 2!
+
+	// std::vector<float> input(fftSize, 0.0f);
+	// std::vector<float> re(audiofft::AudioFFT::ComplexSize(fftSize));
+	// std::vector<float> im(audiofft::AudioFFT::ComplexSize(fftSize));
+	// std::vector<float> output(fftSize);
+
+	// audiofft::AudioFFT fft;
+	// fft.init(1024);
+
+	// for (int i = 0; i < numSamples; i=i+fftSize)
+	// { 
+	// 	std::vector<float> input(fftSize);
+	// 	for(int j=0; j<fftSize; j++)
+	// 	{
+	// 		input[j] = audioFile.samples[channel][i+j];
+	// 	}
+	// 	fft.fft(input.data(), re.data(), im.data());
+	// 	//	fft.ifft(output.data(), re.data(), im.data());
+
+	// 	// Filter dB Buffer array to avoid signal distortion
+	// 	float filter = 0.1f, smoothed = sigBuffer[0];
+	// 	for (int i = 0; i < sigBuffer.size(); i++)
+	// 	{
+	// 		smoothed = filter*sigBuffer[i] + (1.0 - filter)*smoothed;
+	// 		sigBuffer[i] = smoothed;		
+	// 	}
+
+	// }
 	// Wave file (implicit)
 	audioFile.save (argv[2]);
 }
